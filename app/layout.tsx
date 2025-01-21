@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { CanvasProvider } from "./context/CanvasContext"; // Import the provider
 import "./globals.css";
 
 const geistSans = Geist({
@@ -27,7 +28,8 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        {/* Wrap the children with CanvasProvider */}
+        <CanvasProvider>{children}</CanvasProvider>
       </body>
     </html>
   );

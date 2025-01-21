@@ -1,64 +1,47 @@
-'use client'
+'use client';
 
-import { useEffect, useRef } from 'react'
-import { fabric } from 'fabric'
+import { useCanvas } from './context/CanvasContext';
+import Toolbar from './components/Toolbar';
+import { Toaster } from '@/components/ui/toaster';
+
 
 export default function Home() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = new fabric.Canvas(canvasRef.current)
-
-    // Set canvas dimensions
-    canvas.setHeight(600)
-    canvas.setWidth(800)
-
-    // Add gridlines
-    const gridSize = 50
-
-    // Add vertical lines
-    for (let i = 0; i < canvas.width / gridSize; i++) {
-      const verticalLine = new fabric.Line(
-        [i * gridSize, 0, i * gridSize, canvas.height],
-        {
-          stroke: '#ddd',
-          strokeDashArray: [4, 4],
-          selectable: false,
-          evented: false,
-        }
-      )
-      canvas.add(verticalLine)
-    }
-
-    // Add horizontal lines
-    for (let i = 0; i < canvas.height / gridSize; i++) {
-      const horizontalLine = new fabric.Line(
-        [0, i * gridSize, canvas.width, i * gridSize],
-        {
-          stroke: '#ddd',
-          strokeDashArray: [4, 4],
-          selectable: false,
-          evented: false,
-        }
-      )
-      canvas.add(horizontalLine)
-    }
-
-    return () => {
-      canvas.dispose()
-    }
-  }, [])
+  const { canvasRef } = useCanvas();
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-5">
-      <h1 className="text-2xl font-bold text-gray-800 mb-5">
-        Fabric.js Calligraphy App
-      </h1>
-      <canvas
-        ref={canvasRef}
-        id="calligraphy-canvas"
-        className="border-2 border-gray-300 rounded-lg shadow-lg"
-      />
+    
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
+      <h1 className="text-2xl font-bold mb-4">Fabric.js Calligraphy App</h1>
+      
+      <div className="relative border border-gray-300 bg-gray-50 " style={{ width: 700, height: 500 }}>
+        <canvas
+          ref={canvasRef}
+          id="calligraphy-canvas"
+          className="absolute inset-0"
+          width="800"
+          height="600"
+          />
+        {/* Grid overlay */}
+        <div className="absolute inset-0 pointer-events-none">
+          {Array.from({ length: 12 }).map((_, index) => (
+            <div
+            key={index}
+            className="absolute top-0 h-full border-l border-gray-200"
+            style={{ left: `${(index + 1) * (700 / 12)}px` }}
+            />
+          ))}
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div
+            key={index}
+            className="absolute left-0 w-full border-t border-gray-200"
+            style={{ top: `${(index + 1) * (500 / 8)}px` }}
+            />
+          ))}
+        </div>
+      </div>
+      
+      <Toolbar />
+      <Toaster />
     </div>
-  )
+  );
 }
