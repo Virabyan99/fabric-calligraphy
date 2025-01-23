@@ -1,7 +1,12 @@
 import { useCanvas } from '../context/CanvasContext';
 import { fabric } from 'fabric';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import jsPDF from 'jspdf'; // Import the jsPDF library
+
+let historyStack = [];
+let redoStack = [];
+
 
 // Custom Calligraphy Brush
 class CalligraphyBrush extends fabric.PencilBrush {
@@ -23,6 +28,74 @@ export default function Toolbar() {
   const [strokeColor, setStrokeColor] = useState<string>('#000000');
   const [strokeWidth, setStrokeWidth] = useState<number>(2);
   const [sprayDensity, setSprayDensity] = useState<number>(20);
+
+  useEffect(() => {
+    if (canvas) {
+      // Save the initial canvas state to history
+      saveStateToHistory();
+
+      // Add an event listener for any canvas modifications
+      canvas.on('object:added', saveStateToHistory);
+      canvas.on('object:modified', saveStateToHistory);
+      canvas.on('object:removed', saveStateToHistory);
+    }
+
+    return () => {
+      if (canvas) {
+        canvas.off('object:added', saveStateToHistory);
+        canvas.off('object:modified', saveStateToHistory);
+        canvas.off('object:removed', saveStateToHistory);
+      }
+    };
+  }, [canvas]);
+
+  const saveStateToHistory = () => {
+    if (canvas) {
+      redoStack = []; // Clear the redo stack on a new action
+      const json = canvas.toJSON();
+      historyStack.push(json);
+    }
+  };
+
+  const handleUndo = () => {
+    if (historyStack.length > 1) {
+      redoStack.push(historyStack.pop()); // Save the current state to redo stack
+      const previousState = historyStack[historyStack.length - 1];
+      canvas.loadFromJSON(previousState, () => {
+        canvas.renderAll();
+      });
+      toast({
+        title: 'Undo',
+        description: 'Action undone successfully!',
+      });
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Nothing to undo!',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleRedo = () => {
+    if (redoStack.length > 0) {
+      const nextState = redoStack.pop();
+      historyStack.push(nextState); // Save the redone state to history stack
+      canvas.loadFromJSON(nextState, () => {
+        canvas.renderAll();
+      });
+      toast({
+        title: 'Redo',
+        description: 'Action redone successfully!',
+      });
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Nothing to redo!',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const drawRectangle = () => {
     if (canvas) {
@@ -166,6 +239,101 @@ export default function Toolbar() {
     }
   };
 
+  const groupObjects = () => {
+    if (canvas) {
+      const activeObjects = canvas.getActiveObjects();
+      if (activeObjects.length > 1) {
+        // Get absolute positions accounting for transformations
+        const boundingBox = activeObjects.reduce((acc, obj) => {
+          const objBounding = obj.getBoundingRect(true); // Get untransformed bounds
+          return {
+            minLeft: Math.min(acc.minLeft, objBounding.left),
+            minTop: Math.min(acc.minTop, objBounding.top),
+            maxRight: Math.max(acc.maxRight, objBounding.left + objBounding.width),
+            maxBottom: Math.max(acc.maxBottom, objBounding.top + objBounding.height)
+          };
+        }, {
+          minLeft: Infinity,
+          minTop: Infinity,
+          maxRight: -Infinity,
+          maxBottom: -Infinity
+        });
+  
+        const groupLeft = boundingBox.minLeft;
+        const groupTop = boundingBox.minTop;
+  
+        // Create clones with proper relative positioning
+        const clones = activeObjects.map(obj => {
+          const clone = fabric.util.object.clone(obj);
+          const objBounding = obj.getBoundingRect(true);
+          
+          clone.set({
+            left: objBounding.left - groupLeft,
+            top: objBounding.top - groupTop,
+            originX: 'left',
+            originY: 'top',
+            dirty: true
+          });
+          
+          // Reset transformations for proper grouping
+          clone.scaleX = 1;
+          clone.scaleY = 1;
+          clone.angle = 0;
+          clone.skewX = 0;
+          clone.skewY = 0;
+          
+          return clone;
+        });
+  
+        // Create group with correct positioning
+        const group = new fabric.Group(clones, {
+          left: groupLeft,
+          top: groupTop,
+          originX: 'left',
+          originY: 'top'
+        });
+  
+        // Maintain original z-index stack
+        const groupCenter = group.getCenterPoint();
+        group.set({
+          left: groupLeft,
+          top: groupTop,
+          x: groupCenter.x,
+          y: groupCenter.y
+        });
+  
+        // Replace objects and render
+        canvas.remove(...activeObjects);
+        canvas.add(group);
+        group.setCoords();
+        canvas.setActiveObject(group);
+        canvas.requestRenderAll();
+  
+        toast({ title: 'Success', description: 'Objects grouped!' });
+      } else {
+        toast({ title: 'Error', description: 'Select 2+ objects', variant: 'destructive' });
+      }
+    }
+  };
+
+  const ungroupObjects = () => {
+    if (canvas) {
+      const activeObject = canvas.getActiveObject();
+      if (activeObject && activeObject.type === 'group') {
+        const items = activeObject._objects;
+        canvas.remove(activeObject);
+        items.forEach((item) => {
+          canvas.add(item);
+        });
+        canvas.renderAll();
+        toast({
+          title: 'Success',
+          description: 'Objects ungrouped successfully!',
+        });
+      }
+    }
+  };
+
   const changeColor = () => {
     if (canvas) {
       const activeObject = canvas.getActiveObject();
@@ -184,6 +352,91 @@ export default function Toolbar() {
     }
   };
 
+  const exportAsPNG = () => {
+    if (canvas) {
+      const dataURL = canvas.toDataURL({
+        format: 'png',
+        quality: 1.0,
+      });
+
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = 'canvas.png';
+      link.click();
+
+      toast({
+        title: 'Success',
+        description: 'Canvas exported as PNG!',
+      });
+    }
+  };
+
+  const exportAsJSON = () => {
+    if (canvas) {
+      const json = JSON.stringify(canvas.toJSON());
+
+      const blob = new Blob([json], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'canvas.json';
+      link.click();
+
+      toast({
+        title: 'Success',
+        description: 'Canvas exported as JSON!',
+      });
+    }
+  };
+
+  const exportAsPDF = () => {
+    if (canvas) {
+      const dataURL = canvas.toDataURL({
+        format: 'png',
+        quality: 1.0,
+      });
+
+      const pdf = new jsPDF('landscape', 'mm', 'a4'); // Create a PDF instance
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      pdf.addImage(dataURL, 'PNG', 0, 0, pdfWidth, pdfHeight); // Add the canvas image to the PDF
+      pdf.save('canvas.pdf'); // Save the PDF file
+
+      toast({
+        title: 'Success',
+        description: 'Canvas exported as PDF!',
+      });
+    }
+  };
+
+  const changeShapeFillColor = (newColor) => {
+    if (canvas) {
+      const activeObject = canvas.getActiveObject();
+      if (activeObject) {
+        activeObject.set('fill', newColor); // Set the shape's fill color
+        canvas.renderAll();
+        toast({
+          title: 'Success',
+          description: 'Shape fill color updated!',
+        });
+      } else {
+        toast({
+          title: 'No Object Selected',
+          description: 'Please select a shape to change its fill color.',
+          variant: 'destructive',
+        });
+      }
+    }
+  };
+
+  const changeBrushOrOutlineColor = (newColor) => {
+    setStrokeColor(newColor);
+    if (canvas && canvas.freeDrawingBrush) {
+      canvas.freeDrawingBrush.color = newColor; // Update brush color
+    }
+  };
+
+
   return (
     <>
       {/* Left Toolbar */}
@@ -194,12 +447,12 @@ export default function Toolbar() {
           Clear Canvas
         </button>
         <button
-          onClick={undo}
+          onClick={handleUndo}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
           Undo
         </button>
         <button
-          onClick={redo}
+          onClick={handleRedo}
           className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
           Redo
         </button>
@@ -208,6 +461,7 @@ export default function Toolbar() {
           className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
           Cancel Drawing
         </button>
+       
       </div>
 
       {/* Right Toolbar */}
@@ -228,6 +482,16 @@ export default function Toolbar() {
           onClick={drawLine}
           className="px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600">
           Line
+        </button>
+        <button
+          onClick={groupObjects}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+          Group
+        </button>
+        <button
+          onClick={ungroupObjects}
+          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">
+          Ungroup
         </button>
         <button
           onClick={saveCanvas}
@@ -259,17 +523,23 @@ export default function Toolbar() {
         </label>
 
         <label className="flex flex-col gap-2">
-          Brush Color:
-          <input
-            type="color"
-            value={strokeColor}
-            onChange={(e) => {
-              setStrokeColor(e.target.value);
-              configureBrush('color', e.target.value);
-            }}
-            className="cursor-pointer"
-          />
-        </label>
+        Brush/Outline Color:
+        <input
+          type="color"
+          value={strokeColor}
+          onChange={(e) => changeBrushOrOutlineColor(e.target.value)}
+          className="cursor-pointer"
+        />
+      </label>
+
+      <label className="flex flex-col gap-2">
+        Shape Fill Color:
+        <input
+          type="color"
+          onChange={(e) => changeShapeFillColor(e.target.value)}
+          className="cursor-pointer"
+        />
+      </label>
 
         <label className="flex flex-col gap-2">
           Brush Width:
@@ -307,6 +577,24 @@ export default function Toolbar() {
           onClick={changeColor}
           className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 mt-4">
           Change Color
+        </button>
+        <button
+          onClick={exportAsPNG}
+          className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+        >
+          Export as PNG
+        </button>
+        <button
+          onClick={exportAsJSON}
+          className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+        >
+          Export as JSON
+        </button>
+        <button
+          onClick={exportAsPDF}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        >
+          Export as PDF
         </button>
       </div>
     </>
